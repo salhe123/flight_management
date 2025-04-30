@@ -1,5 +1,8 @@
 import React, { useState } from 'react';
-import { TextField, Button, Grid, CircularProgress, Typography, List, ListItem, ListItemButton } from '@mui/material';
+import {
+  TextField, Button, Grid, CircularProgress, Typography, List, ListItem, ListItemButton,
+  Box, Paper
+} from '@mui/material';
 import { searchAirports, searchFlights } from '../api/api';
 
 const SearchForm = ({ setFlightResults, setHasSearched }) => {
@@ -10,202 +13,204 @@ const SearchForm = ({ setFlightResults, setHasSearched }) => {
   const [destinationSuggestions, setDestinationSuggestions] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState({ origin: '', destination: '', general: '' });
+  const [destinationImageUrl, setDestinationImageUrl] = useState('');
 
-  // Handle Search Button Click
-  const handleSearch = async () => {
+
+  // State to track if the user has searched for flights
+  const handleSearch = async (e) => {
+    e.preventDefault();
     setLoading(true);
-    setError({ origin: '', destination: '', general: '' }); // Reset errors
-    setHasSearched(true); // Mark as searched
-  
+    setError({ origin: '', destination: '', general: '' });
+    setHasSearched(true);
+
     try {
-      const params = {
-        originSkyId: origin, // Only SkyId (e.g., 'GAN')
-        destinationSkyId: destination, // Only SkyId (e.g., 'STN')
-        date,
-      };
-  
-      console.log('API Request Params:', params); // Debugging: Log the request params
-  
-      const flights = await searchFlights(params);
-  
-      console.log('API Response:', flights); // Debugging: Log the API response
-  
-      if (!flights.status) {
-        const newError = { origin: '', destination: '', general: '' };
-  
-        flights.message.forEach((error) => {
-          if (error.originEntityId) newError.origin = error.originEntityId;
-          if (error.destinationEntityId) newError.destination = error.destinationEntityId;
+      const originEntity = originSuggestions.find((s) => s.skyId === origin);
+      const destinationEntity = destinationSuggestions.find((s) => s.skyId === destination);
+
+      if (!originEntity || !destinationEntity) {
+        setError({
+          origin: !originEntity ? 'Please select a valid origin.' : '',
+          destination: !destinationEntity ? 'Please select a valid destination.' : '',
         });
-  
-        setError(newError);
-        setFlightResults([]); // Clear previous results in case of error
-      } else {
-        setFlightResults(flights.data); // Successfully set flight results
+        setLoading(false);
+        return;
       }
-    } catch (error) {
-      console.error('Error searching flights:', error.message || error);
+
+      const params = {
+        originSkyId: origin,
+        destinationSkyId: destination,
+        date,
+        originEntityId: originEntity.navigation.entityId,
+        destinationEntityId: destinationEntity.navigation.entityId,
+      };
+
+      const flightsResponse = await searchFlights(params);
+
+      if (!flightsResponse.status) {
+        setError({ general: flightsResponse.message || 'No flights found.' });
+        setDestinationImageUrl(flightsResponse.destinationImageUrl || '');
+        setFlightResults([]);
+      } else {
+        setFlightResults(flightsResponse.data.itineraries || []);
+        setDestinationImageUrl(flightsResponse.destinationImageUrl || '');
+      }
+    } catch (err) {
+      console.error('Flight search error:', err);
       setError({ general: 'Something went wrong. Please try again later.' });
     } finally {
       setLoading(false);
     }
   };
 
-  // Fetch Suggestions Dynamically as User Types
   const handleAutocomplete = async (query, setSuggestions) => {
     if (!query) {
-      setSuggestions([]); // Clear suggestions if input is empty
+      setSuggestions([]);
       return;
     }
     try {
       const airports = await searchAirports(query);
-      console.log('API Response:', airports); // Log the raw API response
-  
-      // Filter out invalid entries
       const validAirports = airports.filter(
         (airport) =>
-          airport && // Ensure the airport object exists
-          airport.skyId && // Ensure skyId exists
-          airport.presentation?.suggestionTitle // Ensure suggestionTitle exists
+          airport?.skyId &&
+          airport.presentation?.suggestionTitle &&
+          airport.navigation?.entityId
       );
-  
-      setSuggestions(validAirports); // Update suggestions with valid data
-      console.log('Valid Suggestions:', validAirports); // Log filtered suggestions
-    } catch (error) {
-      console.error('Error fetching airport suggestions:', error);
-      setSuggestions([]); // Clear suggestions on error
+      setSuggestions(validAirports);
+    } catch (err) {
+      console.error('Airport fetch error:', err);
+      setSuggestions([]);
     }
   };
 
-  // Handle Selecting a Suggestion
-  const handleSelectSuggestion = (skyId, title, setField, clearSuggestions) => {
-    setField(skyId); // Set the NAME/TITLE (e.g., "Addis Ababa") in the input field
-    clearSuggestions([]); // Clear the suggestions list
-    console.log(`Selected ${title} (${skyId})`); // Debugging: Show what was selected
+  const handleSelectSuggestion = (skyId, setField, clearSuggestions) => {
+    setField(skyId);
+    clearSuggestions([]);
   };
 
   return (
-    <Grid container spacing={2}>
-      {/* Origin Input Field */}
-      <Grid item xs={12} sm={6}>
-        <TextField
-          label="Origin"
-          value={origin}
-          onChange={(e) => {
-            setOrigin(e.target.value);
-            handleAutocomplete(e.target.value, setOriginSuggestions);
-          }}
-          fullWidth
-          error={!!error.origin}
-          helperText={error.origin}
-        />
-        {/* Suggestions Dropdown */}
-        {originSuggestions.length > 0 && (
-          <List>
-          {originSuggestions.map((airport, index) => {
-            // Skip invalid entries
-            if (!airport || !airport.skyId || !airport.presentation?.suggestionTitle) {
-              console.warn('Skipping invalid suggestion:', airport);
-              return null;
-            }
-        
-            return (
-              <ListItem key={`${airport.skyId}-${index}`}>
-                <ListItemButton
-                  onClick={() =>
-                    handleSelectSuggestion(
-                      airport.skyId, // Pass SkyId
-                      airport.presentation.suggestionTitle, // Pass Title (e.g., "Addis Ababa")
-                      setOrigin, // Update Origin Input Field
-                      setOriginSuggestions // Clear Suggestions
-                    )
-                  }
-                >
-                  {airport.presentation.suggestionTitle}
-                </ListItemButton>
-              </ListItem>
-            );
-          })}
-        </List>
-        )}
-      </Grid>
+    <Paper elevation={3} sx={{ p: 4, maxWidth: 800, mx: 'auto', mt: 4 }}>
+      <Typography variant="h5" gutterBottom textAlign="center">
+        Flight Search
+      </Typography>
+      <Box component="form" onSubmit={handleSearch}>
+        <Grid container spacing={3}>
+          {/* Origin Input */}
+          <Grid item xs={12} sm={6}>
+            <TextField
+              label="Origin"
+              value={origin}
+              onChange={(e) => {
+                setOrigin(e.target.value);
+                handleAutocomplete(e.target.value, setOriginSuggestions);
+              }}
+              fullWidth
+              error={!!error.origin}
+              helperText={error.origin}
+            />
+            {originSuggestions.length > 0 && (
+              <List dense sx={{ bgcolor: '#f9f9f9', borderRadius: 1 }}>
+                {originSuggestions.map((airport, idx) => (
+                  <ListItem key={`${airport.skyId}-${idx}`} disablePadding>
+                    <ListItemButton
+                      onClick={() =>
+                        handleSelectSuggestion(
+                          airport.skyId,
+                          setOrigin,
+                          setOriginSuggestions
+                        )
+                      }
+                    >
+                      {airport.presentation.suggestionTitle}
+                    </ListItemButton>
+                  </ListItem>
+                ))}
+              </List>
+            )}
+          </Grid>
 
-      {/* Destination Input Field */}
-      <Grid item xs={12} sm={6}>
-        <TextField
-          label="Destination"
-          value={destination}
-          onChange={(e) => {
-            setDestination(e.target.value);
-            handleAutocomplete(e.target.value, setDestinationSuggestions);
-          }}
-          fullWidth
-          error={!!error.destination}
-          helperText={error.destination}
-        />
-        {/* Suggestions Dropdown */}
-        {/* Suggestions Dropdown for Destination */}
-{destinationSuggestions.length > 0 && (
-  <List>
-    {destinationSuggestions.map((airport, index) => {
-      // Ensure the airport object and required fields are valid
-      if (!airport || !airport.skyId || !airport.presentation?.suggestionTitle) {
-        console.warn('Skipping invalid suggestion:', airport);
-        return null; // Skip invalid entries
-      }
+          {/* Destination Input */}
+          <Grid item xs={12} sm={6}>
+            <TextField
+              label="Destination"
+              value={destination}
+              onChange={(e) => {
+                setDestination(e.target.value);
+                handleAutocomplete(e.target.value, setDestinationSuggestions);
+              }}
+              fullWidth
+              error={!!error.destination}
+              helperText={error.destination}
+            />
+            {destinationSuggestions.length > 0 && (
+              <List dense sx={{ bgcolor: '#f9f9f9', borderRadius: 1 }}>
+                {destinationSuggestions.map((airport, idx) => (
+                  <ListItem key={`${airport.skyId}-${idx}`} disablePadding>
+                    <ListItemButton
+                      onClick={() =>
+                        handleSelectSuggestion(
+                          airport.skyId,
+                          setDestination,
+                          setDestinationSuggestions
+                        )
+                      }
+                    >
+                      {airport.presentation.suggestionTitle}
+                    </ListItemButton>
+                  </ListItem>
+                ))}
+              </List>
+            )}
+          </Grid>
 
-      return (
-        <ListItem key={`${airport.skyId}-${index}`}>
-          <ListItemButton
-            onClick={() =>
-              handleSelectSuggestion(
-                airport.skyId, // Pass SkyId
-                airport.presentation.suggestionTitle, // Pass Title (e.g., "Bangkok")
-                setDestination, // Update Destination Input Field
-                setDestinationSuggestions // Clear Suggestions
-              )
-            }
-          >
-            {airport.presentation.suggestionTitle}
-          </ListItemButton>
-        </ListItem>
-      );
-    })}
-  </List>
-)}
-      </Grid>
+          {/* Date Picker */}
+          <Grid item xs={12} sm={6}>
+            <TextField
+              label="Date"
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              fullWidth
+              InputLabelProps={{ shrink: true }}
+            />
+          </Grid>
 
-      {/* Date Input Field */}
-      <Grid item xs={12} sm={6}>
-        <TextField
-          label="Date"
-          type="date"
-          value={date}
-          onChange={(e) => setDate(e.target.value)}
-          fullWidth
-          InputLabelProps={{ shrink: true }}
-        />
-      </Grid>
+          {/* Submit Button */}
+          <Grid item xs={12}>
+            <Button
+              type="submit"
+              variant="contained"
+              fullWidth
+              disabled={loading}
+              startIcon={loading && <CircularProgress size={20} />}
+            >
+              {loading ? 'Searching...' : 'Search Flights'}
+            </Button>
+          </Grid>
 
-      {/* Search Button */}
-      <Grid item xs={12}>
-        <Button
-          variant="contained"
-          onClick={handleSearch}
-          disabled={loading}
-          startIcon={loading && <CircularProgress size={20} />}
-        >
-          {loading ? 'Searching...' : 'Search Flights'}
-        </Button>
-      </Grid>
+          {/* General Error Message */}
+          {error.general && (
+            <Grid item xs={12}>
+              <Typography color="error" align="center">
+                {error.general}
+              </Typography>
+            </Grid>
+          )}
 
-      {/* General Error Message */}
-      {error.general && (
-        <Grid item xs={12}>
-          <Typography color="error">{error.general}</Typography>
+          {/* Optional Image Display */}
+          {!loading && destinationImageUrl && error.general && (
+            <Grid item xs={12}>
+              <Box textAlign="center">
+                <img
+                  src={destinationImageUrl}
+                  alt="No flights available"
+                  style={{ width: '100%', maxWidth: '400px', borderRadius: 8 }}
+                />
+              </Box>
+            </Grid>
+          )}
         </Grid>
-      )}
-    </Grid>
+      </Box>
+    </Paper>
   );
 };
 
